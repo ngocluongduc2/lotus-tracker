@@ -1,0 +1,37 @@
+name: Auto Issue (manual or cron)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "How many issues to create"
+        type: number
+        required: true
+        default: 1
+  schedule:
+    - cron: '2/5 * * * *'
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issues via API (loop)
+        env:
+          GH_TOKEN: ${{ secrets.PAT_USER }}
+          REPEAT: ${{ inputs.repeat || 1 }}
+        run: |
+          set -e
+          repeat="${REPEAT:-1}"
+          for i in $(seq 1 "$repeat"); do
+            now="$(date -u +'%F %T')"
+            title="Pulse ${now} #$i"
+            gh api repos/${{ github.repository }}/issues \
+              --method POST \
+              --header "Content-Type: application/json" \
+              --input <(jq -n --arg t "$title" '{title:$t, body:"Automated issue from workflow_dispatch.", labels:["automation","pulse"]}')
+            sleep 1
+          done

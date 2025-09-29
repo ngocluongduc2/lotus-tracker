@@ -1,0 +1,44 @@
+name: Open PRs for auto/* branches
+
+on:
+  workflow_dispatch:
+    inputs:
+      pattern:
+        description: 'Regex веток'
+        required: true
+        default: 'auto/.*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open-many-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List auto branches
+        id: list
+        env:
+          GH_TOKEN: ${{ secrets.PAT_USER }}   # используем персональный токен
+        run: |
+          gh api repos/${{ github.repository }}/branches --paginate --jq '.[].name' > all.txt
+          awk -v re="${{ inputs.pattern }}" '$0 ~ re {print}' all.txt > match.txt
+          echo "count=$(wc -l < match.txt)" >> "$GITHUB_OUTPUT"
+          cat match.txt
+
+      - name: Create PRs (auto/* -> main)
+        if: steps.list.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_USER }}   # и здесь тоже
+        run: |
+          while read -r BR; do
+            echo "Opening PR for $BR"
+            gh api repos/${{ github.repository }}/pulls \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -f title="Auto PR: ${BR} -> main" \
+              -f head="${BR}" \
+              -f base="main" \
+              -f body="Automated PR for ${BR}" \
+            || echo "Skip: PR already exists for ${BR}"
+          done < match.txt

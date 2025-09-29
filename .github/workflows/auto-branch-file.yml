@@ -1,0 +1,63 @@
+name: Auto create branch and file
+
+on:
+  schedule:
+    - cron: '11 3 * * *'
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "How many branches/files to create"
+        type: number
+        required: true
+        default: 1
+
+permissions:
+  contents: write
+
+jobs:
+  create-branch-and-file:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get latest SHA of main (as user)
+        id: base
+        env:
+          GH_TOKEN: ${{ secrets.PAT_USER }}
+        run: |
+          SHA=$(gh api repos/${{ github.repository }}/git/refs/heads/main --jq '.object.sha')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Loop and create N branches + files (as user)
+        env:
+          GH_TOKEN: ${{ secrets.PAT_USER }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          REPEAT: ${{ inputs.repeat || 1 }}
+        run: |
+          set -euo pipefail
+          repeat="${REPEAT:-1}"
+          for i in $(seq 1 "$repeat"); do
+            ts="$(date -u +'%Y%m%d-%H%M%S')-$i"
+            new="auto/${ts}"
+
+            # 1) Create branch from main
+            gh api repos/${{ github.repository }}/git/refs \
+              --method POST \
+              -H "Content-Type: application/json" \
+              -f ref="refs/heads/${new}" \
+              -f sha="${BASE_SHA}"
+
+            # 2) Create file in that branch
+            path="files/auto-${ts}.txt"
+            body="$(printf 'Created at %s UTC\nRepo: %s\nBranch: %s\n' "$(date -u +'%F %T')" "${GITHUB_REPOSITORY}" "$new")"
+            b64="$(printf '%s' "$body" | base64 -w0)"
+
+            gh api \
+              --method PUT \
+              -H "Content-Type: application/json" \
+              /repos/${{ github.repository }}/contents/${path} \
+              -f message="chore: add ${path}" \
+              -f branch="${new}" \
+              -f content="${b64}"
+
+            # Небольшая пауза, чтобы не ловить abuse/secondary rate limit
+            sleep 1
+          done
