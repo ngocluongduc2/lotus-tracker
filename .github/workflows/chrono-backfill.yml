@@ -1,0 +1,55 @@
+name: Backfill
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        default: main
+      author_name:
+        required: false
+        default: Heatmap Bot
+      author_email:
+        required: false
+      dates_json:
+        required: true
+      message:
+        required: false
+        default: Backfill
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{inputs.branch}}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Backfill commits
+        shell: bash
+        env:
+          DATES_JSON: ${{inputs.dates_json}}
+          BRANCH: ${{inputs.branch}}
+          AUTHOR_NAME: ${{inputs.author_name}}
+          AUTHOR_EMAIL: ${{inputs.author_email}}
+          DEFAULT_NO_REPLY: ${{github.actor}}@users.noreply.github.com
+          MSG_PREFIX: ${{inputs.message}}
+        run: |
+          set -e
+          NAME="${AUTHOR_NAME:-Heatmap Bot}"
+          EMAIL="${AUTHOR_EMAIL:-$DEFAULT_NO_REPLY}"
+          git config user.name "$NAME"
+          git config user.email "$EMAIL"
+          echo "$DATES_JSON" > dates.json
+          node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("dates.json","utf8")); console.log(d.join("\n"));' > dates.txt
+          while IFS= read -r ymd; do
+            [ -z "$ymd" ] && continue
+            mkdir -p daily
+            echo "Backfill commit for $ymd" > "daily/$ymd.txt"
+            git add .
+            GIT_AUTHOR_DATE="${ymd}T12:00:00" GIT_COMMITTER_DATE="${ymd}T12:00:00" git commit -m "${MSG_PREFIX:-Backfill} ${ymd}" --allow-empty --date "${ymd}T12:00:00"
+          done < dates.txt
+          git push origin HEAD:$BRANCH
